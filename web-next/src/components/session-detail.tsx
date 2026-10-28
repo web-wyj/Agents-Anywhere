@@ -406,6 +406,9 @@ export function SessionDetail({
     || runtimeStatus === "running"
     || runtimeStatus === "stopping"
     || runtimeStatus === "waiting_approval"
+  // Latest turn state for the socket callbacks, which run outside this render.
+  const turnInProgressRef = React.useRef(turnInProgress)
+  turnInProgressRef.current = turnInProgress
   const previousStatusTraceRef = React.useRef<{
     sessionId: string
     sessionStatus: string
@@ -1064,12 +1067,40 @@ export function SessionDetail({
       }
     }
 
+    // The snapshot serves the newest cached runtime status so first paint never
+    // waits on a runtime-owned read, and the correction that follows is a live
+    // projection: a socket that subscribes afterwards never receives it. Pull the
+    // current status once per subscription so a stale "running" cannot trap the
+    // composer until the next reload.
+    const reconcileRuntimeStatus = async (connection: number) => {
+      if (!turnInProgressRef.current) return
+      const response = await dashboardApi
+        .getSessionRuntimeState(token, sessionId)
+        .catch(() => null)
+      if (cancelled || !socketSubscribed || connection !== connectionSequence) return
+      const incoming = response?.state
+      if (!incoming) return
+      setState((current) => {
+        if (!current || current.session.id !== sessionId) return current
+        if (incoming.sessionId !== current.session.id) return current
+        // Never let this read override a newer projection that already arrived.
+        if (incoming.updatedSeq < (current.state?.updatedSeq ?? 0)) return current
+        if (current.state?.status === incoming.status && current.state?.updatedSeq === incoming.updatedSeq) {
+          return current
+        }
+        return { ...current, state: incoming }
+      })
+    }
+
     const recoverAfterSubscription = async (reason: string, connection: number) => {
       const pendingRecovery = recoveryPromise
       if (pendingRecovery) await pendingRecovery
       if (cancelled || !snapshotReady || !socketSubscribed) return
       await recoverEvents(eventSequenceCursor.current(sessionId), reason)
       if (!cancelled && socketSubscribed && connection === connectionSequence) recoveredSubscriptions.recovered(connection)
+      // Deliberately not awaited: a runtime-owned read can be slow and must not
+      // hold back the rest of subscription recovery.
+      void reconcileRuntimeStatus(connection)
     }
 
     const connect = async () => {
