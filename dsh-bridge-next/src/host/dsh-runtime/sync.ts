@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 import { createProjection, replayHistory, PROJECTION_VERSION, type SessionProjection } from './history.js'
-import { readSessionCost, type SessionCost } from './cost-meter.js'
+import { readSessionCost, readUsageSummary, type SessionCost } from './cost-meter.js'
 import { contentHash } from './identity.js'
 import { sessionId } from './identity.js'
 import type { NativeChange, NativeRuntime } from './native.js'
@@ -445,7 +445,8 @@ export class SyncFeed {
       const last = [...projection.snapshot()].reverse()
         .find(item => item.type === 'message' && item.role === 'assistant')
       if (!last) return
-      const content = { ...last.content, cost }
+      const usageSummary = readUsageSummary()
+      const content = { ...last.content, cost, ...(usageSummary ? { usageSummary } : {}) }
       const item = { ...last, content, contentHash: contentHash({ ...last, content }) }
       await this.notification('timeline.itemUpsert', { sessionId, externalSessionId: id, item })
     }

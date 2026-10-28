@@ -55,3 +55,44 @@ export function readSessionCost(externalSessionId: string): SessionCost | null {
   }
   return cache.sessions.get(externalSessionId) ?? null
 }
+
+export type UsageSummary = {
+  todayTokens: number
+  todayInput: number
+  todayOutput: number
+  todayCacheRead: number
+  todayCny: number
+  balanceCny: number | null
+  capturedAt: number
+}
+
+/** Totals for the most recent day in the ledger plus the cached official balance. */
+export function readUsageSummary(): UsageSummary | null {
+  let path: string
+  try { path = ledgerPath() } catch { return null }
+  try {
+    const ledger = JSON.parse(readFileSync(path, "utf8")) as {
+      days?: Record<string, LedgerDay>
+      balanceRef?: Record<string, unknown>
+    }
+    const days = Object.keys(ledger.days ?? {}).sort()
+    const latest = days[days.length - 1]
+    if (!latest) return null
+    const day = ledger.days![latest] as unknown as Record<string, unknown>
+    const todayInput = num(day, "input")
+    const todayOutput = num(day, "output")
+    const todayCacheRead = num(day, "cacheRead")
+    const balance = ledger.balanceRef
+    const balanceCny = balance && typeof balance.cny === "number" && Number.isFinite(balance.cny)
+      ? balance.cny : num(balance ?? {}, "costCny") || null
+    return {
+      todayTokens: todayInput + todayOutput + todayCacheRead,
+      todayInput,
+      todayOutput,
+      todayCacheRead,
+      todayCny: num(day, "costCny"),
+      balanceCny,
+      capturedAt: Date.now(),
+    }
+  } catch { return null }
+}
