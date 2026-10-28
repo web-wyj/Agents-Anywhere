@@ -52,6 +52,7 @@ import { createSessionEventBuffer } from "@/components/session/session-event-buf
 import { CAPABILITY, capabilityIsUsable, findCapability } from "@/components/session/capabilities"
 import { SessionComposer, type AttachedFile } from "@/components/session/session-composer"
 import { commandResult, commandTransportFailure, type CommandOutcome } from "@/components/session/runtime-command-model"
+import { readTurnCost, type TurnCost } from "@/lib/turn-cost"
 import { createRecoveredSubscriptionTracker, useRuntimeCommands } from "@/components/session/use-runtime-commands"
 import {
   acceptSessionEventId,
@@ -2047,6 +2048,7 @@ function buildTurnActionsByGroupKey(
   let replyItems: TimelineItem[] = []
   let endGroupKey: string | null = null
   let turnOpen = false
+  let turnCost: TurnCost | undefined
 
   const commitTurn = () => {
     if (endGroupKey && itemIds.length > 0) {
@@ -2054,6 +2056,7 @@ function buildTurnActionsByGroupKey(
         copyText: copyParts.join("\n\n").trim(),
         itemIds: [...new Set(itemIds)],
         items: replyItems,
+        ...(turnCost ? { cost: turnCost } : {}),
       })
     }
     copyParts = []
@@ -2061,6 +2064,7 @@ function buildTurnActionsByGroupKey(
     replyItems = []
     endGroupKey = null
     turnOpen = false
+    turnCost = undefined
   }
 
   for (const group of groups) {
@@ -2077,6 +2081,10 @@ function buildTurnActionsByGroupKey(
     for (const item of replies) {
       itemIds.push(item.id)
       if (!replyItems.some((existing) => existing.id === item.id)) replyItems.push(item)
+      // Runtimes that track cost attach the whole turn's cost to one of its
+      // replies, so the last value seen wins instead of being summed.
+      const itemCost = readTurnCost(item.source)
+      if (itemCost) turnCost = itemCost
       const text = stripInjectedAttachmentMentions(messageText(item)).trim()
       if (text) copyParts.push(text)
     }

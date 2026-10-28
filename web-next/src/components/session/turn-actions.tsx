@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Braces, Check, Copy, Ellipsis, Loader2, SquareArrowOutUpRight } from "lucide-react"
+import { Braces, Check, ChevronDown, Copy, Ellipsis, Loader2, SquareArrowOutUpRight } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -26,12 +26,18 @@ import type { SessionShareScope, TimelineItem } from "@/features/dashboard/types
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
+import { formatCostCny, formatTokenCount, type TurnCost } from "@/lib/turn-cost"
+
+/** Cost of one turn, reported by the runtime through the item's `source.cost`. */
+export type { TurnCost }
 
 export type TurnAction = {
   copyText: string
   itemIds: string[]
   /** Assistant replies of the turn, kept for the debug copy actions. */
   items: TimelineItem[]
+  /** Per-turn cost when the runtime reports it; absent otherwise. */
+  cost?: TurnCost
 }
 
 export function TurnActions({
@@ -50,6 +56,7 @@ export function TurnActions({
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [scope, setScope] = React.useState<SessionShareScope>("message")
   const [sharing, setSharing] = React.useState(false)
+  const [costExpanded, setCostExpanded] = React.useState(false)
 
   // Debug copies. On touch devices the timeline no longer takes the long press
   // for a context menu, so these actions live behind this "more" menu instead.
@@ -164,6 +171,36 @@ export function TurnActions({
             </DropdownMenu>
           ) : null}
         </div>
+        {action.cost ? (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] leading-4 text-muted-foreground">
+            <span className="tabular-nums">{formatCostCny(action.cost.cny)}</span>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">
+              {t("turnCostTokens", {
+                count: formatTokenCount(action.cost.input + action.cost.output),
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCostExpanded((expanded) => !expanded)}
+              aria-expanded={costExpanded}
+              aria-label={t("turnCostDetails")}
+              title={t("turnCostDetails")}
+              className="inline-flex size-4 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+            >
+              <ChevronDown className={cn("size-3 transition-transform", costExpanded && "rotate-180")} />
+            </button>
+            {costExpanded ? (
+              <span className="basis-full tabular-nums text-muted-foreground/80">
+                {t("turnCostBreakdown", {
+                  input: formatTokenCount(action.cost.input),
+                  output: formatTokenCount(action.cost.output),
+                  cache: formatTokenCount(action.cost.cacheRead),
+                })}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!sharing) setDialogOpen(open) }}>
