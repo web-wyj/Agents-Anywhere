@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 import { createProjection, replayHistory, PROJECTION_VERSION, type SessionProjection } from './history.js'
+import { readSessionCost, type SessionCost } from './cost-meter.js'
+import { contentHash } from './identity.js'
 import { sessionId } from './identity.js'
 import type { NativeChange, NativeRuntime } from './native.js'
 import { record, type TimelineItem } from './types.js'
@@ -52,6 +54,7 @@ export class SyncFeed {
   private bufferedOperations: SyncOperation[] | undefined
   private bufferedBytes = 0
   private checkpointDirty = new Set<string>()
+  private costBaseline = new Map<string, SessionCost>()
 
   get retainedProjectionCount(): number { return this.projections.size }
 
@@ -369,6 +372,10 @@ export class SyncFeed {
           return
         }
         if (change.type === 'event') {
+          if (change.event.type === 'turn/start') {
+            const baseline = readSessionCost(id)
+            if (baseline) this.costBaseline.set(id, baseline)
+          }
           if (['model/selection', 'agent-preset/selected'].includes(change.event.type)) capabilities.add(id)
           if (change.event.type === 'turn/end') ended.push([id, {
             sessionId: this.published.get(id), externalSessionId: id,
@@ -402,7 +409,10 @@ export class SyncFeed {
       else await this.items(id, delta.items)
     })
     for (const [id, params] of ended) await this.sessionOperation(id, 'turnEnded', async () => {
-      if (this.published.has(id) && await this.native.visible(id)) await this.notification('session.turnEnded', params)
+      if (this.published.has(id) && await this.native.visible(id)) {
+        await this.notification('session.turnEnded', params)
+        await this.publishTurnCost(id, this.published.get(id)!)
+      }
     })
     for (const id of statuses) await this.sessionOperation(id, 'state', () => this.state(id))
     if (runtimeCapabilities) await this.runtimeOperation('capabilities', async () => this.notification('runtime.capability.updated', await this.native.capabilities()))
@@ -412,6 +422,39 @@ export class SyncFeed {
     })
     if (reconcile) await this.reconcile()
   }
+  // Cost is reported by the optional dsh-cost-meter plugin, which records a
+  // per-session cumulative total. The turn's share is the delta since turn/start,
+  // attached to the turn's last reply as `content.cost`. It has to live in
+  // `content` because the Server skips upserts whose contentHash did not change.
+  private async publishTurnCost(id: string, sessionId: string): Promise<void> {
+    const baseline = this.costBaseline.get(id)
+    if (!baseline) return
+    this.costBaseline.delete(id)
+    const projection = this.projections.get(id)
+    if (!projection) return
+    const emit = async (): Promise<void> => {
+      const cumulative = readSessionCost(id)
+      if (!cumulative) return
+      const cost = {
+        cny: Number(Math.max(0, cumulative.cny - baseline.cny).toFixed(6)),
+        input: Math.max(0, cumulative.input - baseline.input),
+        output: Math.max(0, cumulative.output - baseline.output),
+        cacheRead: Math.max(0, cumulative.cacheRead - baseline.cacheRead),
+      }
+      if (cost.cny <= 0) return
+      const last = [...projection.snapshot()].reverse()
+        .find(item => item.type === 'message' && item.role === 'assistant')
+      if (!last) return
+      const content = { ...last.content, cost }
+      const item = { ...last, content, contentHash: contentHash({ ...last, content }) }
+      await this.notification('timeline.itemUpsert', { sessionId, externalSessionId: id, item })
+    }
+    await emit().catch(() => {})
+    // The meter writes after the model call settles, so re-read once for the
+    // final call of the turn.
+    setTimeout(() => { if (!this.closed) void emit().catch(() => {}) }, 2500)
+  }
+
   private async run(): Promise<void> {
     await this.notification('session.inventory.begin', { scanToken: this.id })
     await this.native.inventory(this.abort.signal, async entry => {
