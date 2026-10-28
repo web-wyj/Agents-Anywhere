@@ -53,6 +53,7 @@ import { CAPABILITY, capabilityIsUsable, findCapability } from "@/components/ses
 import { SessionComposer, type AttachedFile } from "@/components/session/session-composer"
 import { commandResult, commandTransportFailure, type CommandOutcome } from "@/components/session/runtime-command-model"
 import { readTurnCost, type TurnCost } from "@/lib/turn-cost"
+import { writeUsageSummary, type UsageSummary } from "@/features/dashboard/usage-summary"
 import { createRecoveredSubscriptionTracker, useRuntimeCommands } from "@/components/session/use-runtime-commands"
 import {
   acceptSessionEventId,
@@ -405,6 +406,18 @@ export function SessionDetail({
   const activeCommandRequestRef = React.useRef<number | null>(null)
 
   const session = state?.session ?? fallbackSession
+
+  React.useEffect(() => {
+    const items = state?.items ?? []
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const raw = items[index]?.content?.usageSummary
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        writeUsageSummary(raw as UsageSummary)
+        break
+      }
+    }
+  }, [state?.items])
+
   const runtimeState = state?.state ?? null
   const runtimeStatus = effectiveRuntimeStatus(runtimeState, session)
   const turnInProgress = runtimeStatus === "waiting"
@@ -2083,7 +2096,7 @@ function buildTurnActionsByGroupKey(
       if (!replyItems.some((existing) => existing.id === item.id)) replyItems.push(item)
       // Runtimes that track cost attach the whole turn's cost to one of its
       // replies, so the last value seen wins instead of being summed.
-      const itemCost = readTurnCost(item.source)
+      const itemCost = readTurnCost(item.content)
       if (itemCost) turnCost = itemCost
       const text = stripInjectedAttachmentMentions(messageText(item)).trim()
       if (text) copyParts.push(text)

@@ -20,6 +20,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SidebarFooter, useSidebar } from "@/components/ui/sidebar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useUsageSummary } from "@/features/dashboard/usage-summary"
+import { formatCostCny, formatTokenCount } from "@/lib/turn-cost"
 import type { WorkspaceState } from "@/components/workspace-context"
 import { accountDisplayName } from "@/features/auth/account-profile"
 import type { AuthMe } from "@/features/auth/types"
@@ -47,17 +50,19 @@ export function SidebarAccountFooter({
   }
   const userId = me ? accountDisplayName(me) : "Unknown"
   const userRole = me?.role ? me.role.replace(/^\w/, (char) => char.toUpperCase()) : ""
+  const summary = useUsageSummary()
   const userInitials = userId.slice(0, 2).toUpperCase()
   const isAdmin = me?.role === "admin"
 
   return (
     <>
       <SidebarFooter className="min-w-0 px-3 py-3">
+        <div className="flex w-full min-w-0 items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex w-full min-w-0 max-w-full items-center gap-3 rounded-lg px-1 py-1.5 transition-colors hover:bg-sidebar-accent"
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1.5 transition-colors hover:bg-sidebar-accent"
             >
               <Avatar className="size-9 rounded-full">
                 {me?.avatar && <AvatarImage src={me.avatar} alt={userId} />}
@@ -98,6 +103,32 @@ export function SidebarAccountFooter({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {summary ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-1.5 py-1 text-right text-[11px] leading-tight text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <span className="block tabular-nums">{t("usage.today", { cost: formatCostCny(summary.todayCny) })}</span>
+                <span className="block tabular-nums">
+                  {summary.balanceCny === null ? "—" : t("usage.balance", { cost: formatCostCny(summary.balanceCny) })}
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" className="w-56 text-xs">
+              <div className="grid gap-1">
+                <div className="flex justify-between"><span className="text-muted-foreground">{t("usage.todayLabel")}</span><span className="tabular-nums">{formatCostCny(summary.todayCny)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t("usage.tokens")}</span><span className="tabular-nums">{formatTokenCount(summary.todayTokens)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t("usage.input")}</span><span className="tabular-nums">{formatTokenCount(summary.todayInput)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t("usage.output")}</span><span className="tabular-nums">{formatTokenCount(summary.todayOutput)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t("usage.cache")}</span><span className="tabular-nums">{formatTokenCount(summary.todayCacheRead)}</span></div>
+                <div className="mt-1 flex justify-between border-t pt-1"><span className="text-muted-foreground">{t("usage.balanceLabel")}</span><span className="tabular-nums">{summary.balanceCny === null ? "—" : formatCostCny(summary.balanceCny)}</span></div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : null}
+        </div>
       </SidebarFooter>
 
       <Dialog open={signOutOpen} onOpenChange={setSignOutOpen}>

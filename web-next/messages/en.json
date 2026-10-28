@@ -1244,6 +1244,16 @@
       "description": "Agents Anywhere needs a paired online device before you can choose a project or start sessions.",
       "later": "Maybe later",
       "addDevice": "Add device"
+    },
+    "usage": {
+      "today": "Today {cost}",
+      "balance": "Bal {cost}",
+      "todayLabel": "Today",
+      "tokens": "Tokens",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "balanceLabel": "Balance"
     }
   },
   "privacy": {

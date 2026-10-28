@@ -1244,6 +1244,16 @@
       "description": "Agents Anywhere 需要一台已配对且在线的设备，才能选择项目或开始会话。",
       "later": "稍后再说",
       "addDevice": "添加设备"
+    },
+    "usage": {
+      "today": "今日 {cost}",
+      "balance": "余额 {cost}",
+      "todayLabel": "今日",
+      "tokens": "tokens",
+      "input": "输入",
+      "output": "输出",
+      "cache": "缓存",
+      "balanceLabel": "余额"
     }
   },
   "privacy": {
