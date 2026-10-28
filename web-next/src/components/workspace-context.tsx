@@ -443,7 +443,7 @@ export function useWorkspace() {
 // ─── Provider ─────────────────────────────────────────────────
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const { session: authSession } = useAuth()
+  const { session: authSession, loading: authLoading } = useAuth()
   const currentAccessTokenRef = React.useRef(authSession?.accessToken ?? null)
   currentAccessTokenRef.current = authSession?.accessToken ?? null
   const [connectors, setConnectors] = React.useState<ConnectorView[]>([])
@@ -589,8 +589,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const projectDataGenerationRef = React.useRef(0)
   const checkedMissingProjectsRef = React.useRef(new Set<string>())
   const projectRefreshInFlightRef = React.useRef<{ token: string; generation: number; promise: Promise<void> } | null>(null)
-  // Cold-start restore of the previously opened session (see the effects below).
-  const lastSessionRestoredRef = React.useRef(false)
+  // The first route is decided once per signed-in session (see the routing effect).
+  const routeDecidedRef = React.useRef(false)
   const lastSessionScope = React.useMemo<LastSessionScope | null>(() => {
     if (typeof window === "undefined") return null
     const userId = authSession?.userId
@@ -848,12 +848,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, [applyDashboardSnapshot, authSession?.accessToken, fetchData, workspaceDataEnabled])
 
   // ── Hash routing ──────────────────────────────────────────
+  // The first route is decided by the effect below once the stored account is
+  // known, so nothing that depends on an unauthenticated `route` can paint.
   React.useEffect(() => {
-    // Correct from hash immediately on mount, then keep in sync.
-    const initialRoute = parseHash(window.location.hash)
-    routeRef.current = initialRoute
-    setRoute(initialRoute)
-    setRouteReady(true)
     const handler = () => {
       const nextRoute = parseHash(window.location.hash)
       routeRef.current = nextRoute
@@ -952,30 +949,33 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [lastSessionScope, pushRoute],
   )
 
-  // ── Last session memory ───────────────────────────────────
-  // The PWA always boots at `start_url` (`/`), which is the new-session page.
-  // Remember the session the user actually opened and jump back once per cold
-  // start. Restoring only once matters: otherwise returning home to start a new
-  // session would immediately bounce them back to the old one.
+  // ── First route decision ──────────────────────────────────
+  // A home-screen launch always starts at the manifest `start_url` (`/`), which
+  // is the new-session page. Decide the real first route once the stored account
+  // is known, and only then release `routeReady`: holding it keeps the app on the
+  // loading state, so the new-session page never paints before the session does.
   React.useEffect(() => {
-    lastSessionRestoredRef.current = false
-  }, [authSession?.accessToken])
+    if (routeDecidedRef.current) return
+    // Start as soon as the stored account is known: waiting for the whole auth
+    // boot would put the `/auth/me` round trip in front of the first paint.
+    if (authLoading && !lastSessionScope) return
+    const parsed = parseHash(window.location.hash)
+    let next = parsed
+    // Only a bare new-session route may be replaced; an explicit session link or
+    // a project prefill (`#/new-session/<project>`) wins over the memory.
+    if (parsed.page === "home" && !parsed.projectId) {
+      const remembered = readLastSession(lastSessionScope)
+      if (remembered) next = { page: "session", sessionId: remembered }
+    }
+    routeRef.current = next
+    setRoute(next)
+    setRouteReady(true)
+    routeDecidedRef.current = true
+  }, [authLoading, lastSessionScope])
 
   React.useEffect(() => {
-    if (!routeReady || isLoading || lastSessionRestoredRef.current) return
-    if (route.page !== "home") return
-    // An explicit project prefill (`#/new-session/<project>`) always wins.
-    if (route.projectId) return
-    lastSessionRestoredRef.current = true
-    const remembered = readLastSession(lastSessionScope)
-    if (!remembered) return
-    // Drop entries whose session was deleted or archived while away.
-    if (!sessions.some((session) => session.id === remembered)) {
-      clearLastSession(lastSessionScope)
-      return
-    }
-    replaceRoute({ page: "session", sessionId: remembered })
-  }, [routeReady, isLoading, route, sessions, lastSessionScope, replaceRoute])
+    routeDecidedRef.current = false
+  }, [authSession?.accessToken])
 
   // ── Panel helpers ─────────────────────────────────────────
 
@@ -1439,11 +1439,17 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const activeSessionId = routeSessionId ? resolveSessionAlias(routeSessionId, sessionAliases) : null
 
   // Remember the resolved session (not the raw route value) so aliases reopen
-  // correctly on the next cold start.
+  // correctly on the next cold start. A remembered session can also disappear
+  // while the app is closed; validating here — after the resolved id exists, and
+  // outside the first-route decision — keeps that check off the startup path.
   React.useEffect(() => {
     if (!routeReady || !activeSessionId) return
     writeLastSession(lastSessionScope, activeSessionId)
-  }, [routeReady, activeSessionId, lastSessionScope])
+    if (isLoading) return
+    if (sessions.some((session) => session.id === activeSessionId)) return
+    clearLastSession(lastSessionScope)
+    replaceRoute({ page: "home" })
+  }, [routeReady, isLoading, activeSessionId, sessions, lastSessionScope, replaceRoute])
 
   const activeSessionOptimisticState = activeSessionId ? getOptimisticSessionState(activeSessionId) : null
   const activeSession = activeSessionId
