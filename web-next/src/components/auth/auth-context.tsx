@@ -11,6 +11,11 @@ import {
 import type { AuthMe, OAuthFinalizePayload, StoredSession } from "@/features/auth/types"
 import { useTranslations } from "next-intl"
 import { authFlowHash, clearAuthFlow, rememberAuthFlow, takeAuthFlow } from "@/features/auth/continuation"
+import {
+  offlineProfile,
+  shouldEndSession,
+  writeVerifyFailures,
+} from "@/features/auth/session-verify"
 
 export type AuthScreen =
   | "bootstrap"
@@ -232,14 +237,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const currentUser = await authApi.me(stored.accessToken)
         if (cancelled) return
+        writeVerifyFailures(0)
         setMe(currentUser)
         setScreenState(nextScreen === "login" || nextScreen === "register" || nextScreen === "forgot-password" ? "app" : nextScreen)
-      } catch {
-        clearStoredSession()
+      } catch (error) {
         if (cancelled) return
-        setSession(null)
-        setMe(null)
-        setScreenState(authFlowHash(window.location.hash) ? hashToScreen(window.location.hash) : "login")
+        if (shouldEndSession(error)) {
+          // Credentials are actually rejected, or the server kept failing: stop
+          // pretending the stored session still works.
+          writeVerifyFailures(0)
+          clearStoredSession()
+          setSession(null)
+          setMe(null)
+          setScreenState(authFlowHash(window.location.hash) ? hashToScreen(window.location.hash) : "login")
+          return
+        }
+        // Network hiccups and transient server errors must not sign the user out.
+        // Retry on the next launch, but give up after a run of failures.
+        setSession(stored)
+        setMe(offlineProfile(stored))
+        setScreenState(nextScreen === "login" || nextScreen === "register" || nextScreen === "forgot-password" ? "app" : nextScreen)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -268,6 +285,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     saveStoredSession(nextSession)
     setSession(nextSession)
     const currentUser = await authApi.me(nextSession.accessToken)
+    writeVerifyFailures(0)
     setMe(currentUser)
     setError(null)
     setOauthPending(null)
@@ -398,6 +416,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = React.useCallback(() => {
     clearAuthFlow(window.sessionStorage)
+    writeVerifyFailures(0)
     clearStoredSession()
     setSession(null)
     setMe(null)
