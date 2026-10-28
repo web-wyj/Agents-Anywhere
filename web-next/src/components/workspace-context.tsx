@@ -1410,12 +1410,28 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   // outside the first-route decision — keeps that check off the startup path.
   React.useEffect(() => {
     if (!routeReady || !activeSessionId) return
-    writeLastSession(lastSessionScope, activeSessionId)
-    if (isLoading) return
-    if (sessions.some((session) => session.id === activeSessionId)) return
+    // A brand-new conversation exists only in optimistic state until the server
+    // assigns its id, so it is absent from the inventory by design. Treating that
+    // as "deleted" used to bounce the user back to the new-session page right
+    // after sending the first message.
+    const optimistic = isOptimisticSession(activeSessionId)
+      || getOptimisticSessionState(activeSessionId) !== null
+    const known = sessions.some((session) => session.id === activeSessionId)
+    // Only server-known sessions are worth remembering.
+    if (known) writeLastSession(lastSessionScope, activeSessionId)
+    if (isLoading || optimistic || known) return
     clearLastSession(lastSessionScope)
     replaceRoute({ page: "home" })
-  }, [routeReady, isLoading, activeSessionId, sessions, lastSessionScope, replaceRoute])
+  }, [
+    routeReady,
+    isLoading,
+    activeSessionId,
+    sessions,
+    lastSessionScope,
+    replaceRoute,
+    isOptimisticSession,
+    getOptimisticSessionState,
+  ])
 
   const activeSessionOptimisticState = activeSessionId ? getOptimisticSessionState(activeSessionId) : null
   const activeSession = activeSessionId
