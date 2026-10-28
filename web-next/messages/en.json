@@ -942,6 +942,7 @@
       "copyItemJson": "Copy item JSON",
       "copyItemText": "Copy text",
       "copyReply": "Copy reply",
+      "moreActions": "More actions",
       "replyCopied": "Reply copied",
       "copyReplyFailed": "Failed to copy reply",
       "share": "Share",

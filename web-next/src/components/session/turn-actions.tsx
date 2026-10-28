@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Check, Copy, Loader2, SquareArrowOutUpRight } from "lucide-react"
+import { Braces, Check, Copy, Ellipsis, Loader2, SquareArrowOutUpRight } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -14,14 +14,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { dashboardApi } from "@/features/dashboard/api"
-import type { SessionShareScope } from "@/features/dashboard/types"
+import type { SessionShareScope, TimelineItem } from "@/features/dashboard/types"
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 
 export type TurnAction = {
   copyText: string
   itemIds: string[]
+  /** Assistant replies of the turn, kept for the debug copy actions. */
+  items: TimelineItem[]
 }
 
 export function TurnActions({
@@ -34,10 +44,27 @@ export function TurnActions({
   action: TurnAction
 }) {
   const t = useTranslations("dashboard.session")
+  const tCommon = useTranslations("common")
+  const coarsePointer = useCoarsePointer()
   const [copied, setCopied] = React.useState(false)
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [scope, setScope] = React.useState<SessionShareScope>("message")
   const [sharing, setSharing] = React.useState(false)
+
+  // Debug copies. On touch devices the timeline no longer takes the long press
+  // for a context menu, so these actions live behind this "more" menu instead.
+  const debugItemIds = action.items.map((item) => item.id).join("\n")
+  const debugItemJson = action.items.length === 0
+    ? ""
+    : JSON.stringify(action.items.length === 1 ? action.items[0] : action.items, null, 2)
+  const copyDebug = React.useCallback(async (value: string) => {
+    try {
+      await copyText(value)
+      toast.success(tCommon("copied"))
+    } catch {
+      toast.error(tCommon("copyFailed"))
+    }
+  }, [tCommon])
 
   const copyReply = React.useCallback(async () => {
     if (!action.copyText) return
@@ -106,6 +133,36 @@ export function TurnActions({
           >
             <SquareArrowOutUpRight />
           </Button>
+          {/* Touch devices have no right-click, so the debug copies get an
+              explicit entry here. Mouse users keep the timeline context menu. */}
+          {coarsePointer ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("moreActions")}
+                  title={t("moreActions")}
+                  disabled={action.items.length === 0}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Ellipsis />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuItem disabled={!debugItemIds} onSelect={() => copyDebug(debugItemIds)}>
+                  <Copy data-icon="inline-start" />
+                  {t("copyItemId")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled={!debugItemJson} onSelect={() => copyDebug(debugItemJson)}>
+                  <Braces data-icon="inline-start" />
+                  {t("copyItemJson")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </div>
 

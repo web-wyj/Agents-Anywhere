@@ -18,6 +18,7 @@ import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { JsonBlock, TimelineStatusBadge, ToolCard } from "@/components/session/session-tool-cards"
 import { useSessionFilePreviewOpener } from "@/components/session/session-file-preview-context"
 import { openSessionFilePreview } from "@/components/markdown-text"
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { Notice, SessionView, TimelineItem } from "@/features/dashboard/types"
@@ -98,6 +99,7 @@ function isNestedAgentCall(item: TimelineItem): boolean {
 function TimelineEntryContextMenu({ item, children }: { item: TimelineItem; children: React.ReactNode }) {
   const tSession = useTranslations("dashboard.session")
   const tCommon = useTranslations("common")
+  const coarsePointer = useCoarsePointer()
   const text = timelineItemCopyText(item)
   const copyTimelineValue = async (value: string) => {
     if (!value) return
@@ -106,6 +108,12 @@ function TimelineEntryContextMenu({ item, children }: { item: TimelineItem; chil
     } catch {
       toast.error(tCommon("copyFailed"))
     }
+  }
+  // On touch devices the long press belongs to the browser's selection gesture.
+  // Taking it over broke selecting message text, so the same actions live behind
+  // the per-turn "more" menu instead (see TurnActions).
+  if (coarsePointer) {
+    return <div className="min-w-0 max-w-full select-text">{children}</div>
   }
   return (
     <ContextMenu>
