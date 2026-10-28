@@ -18,6 +18,12 @@ import {
   type AdminSection,
 } from "@/features/admin/navigation"
 import { dashboardApi } from "@/features/dashboard/api"
+import {
+  clearLastSession,
+  readLastSession,
+  writeLastSession,
+  type LastSessionScope,
+} from "@/features/dashboard/last-session"
 import { resolveWorkspaceProject } from "@/features/dashboard/project-workspaces"
 import type {
   ConnectorView as RealConnectorView,
@@ -583,6 +589,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const projectDataGenerationRef = React.useRef(0)
   const checkedMissingProjectsRef = React.useRef(new Set<string>())
   const projectRefreshInFlightRef = React.useRef<{ token: string; generation: number; promise: Promise<void> } | null>(null)
+  // Cold-start restore of the previously opened session (see the effects below).
+  const lastSessionRestoredRef = React.useRef(false)
+  const lastSessionScope = React.useMemo<LastSessionScope | null>(() => {
+    if (typeof window === "undefined") return null
+    const userId = authSession?.userId
+    if (!userId) return null
+    // Same scope the iOS restoration store uses: server origin plus account.
+    return { origin: window.location.origin, userId }
+  }, [authSession?.userId])
 
   const refreshProjects = React.useCallback((): Promise<void> => {
     const token = authSession?.accessToken
@@ -904,7 +919,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [markSessionRead, pushRoute],
   )
 
-  const goHome = React.useCallback(() => pushRoute({ page: "home" }), [pushRoute])
+  // Reaching the new-session page on purpose means the next cold start should
+  // land there too, so the remembered session is dropped here rather than on
+  // every home render (the restore effect already ran once per launch).
+  const goHome = React.useCallback(() => {
+    clearLastSession(lastSessionScope)
+    pushRoute({ page: "home" })
+  }, [lastSessionScope, pushRoute])
   const replaceHome = React.useCallback(() => replaceRoute({ page: "home" }), [replaceRoute])
 
   const navigate = React.useCallback(
@@ -924,9 +945,37 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   )
 
   const startProjectSession = React.useCallback(
-    (projectId: string) => pushRoute({ page: "home", projectId }),
-    [pushRoute],
+    (projectId: string) => {
+      clearLastSession(lastSessionScope)
+      pushRoute({ page: "home", projectId })
+    },
+    [lastSessionScope, pushRoute],
   )
+
+  // ── Last session memory ───────────────────────────────────
+  // The PWA always boots at `start_url` (`/`), which is the new-session page.
+  // Remember the session the user actually opened and jump back once per cold
+  // start. Restoring only once matters: otherwise returning home to start a new
+  // session would immediately bounce them back to the old one.
+  React.useEffect(() => {
+    lastSessionRestoredRef.current = false
+  }, [authSession?.accessToken])
+
+  React.useEffect(() => {
+    if (!routeReady || isLoading || lastSessionRestoredRef.current) return
+    if (route.page !== "home") return
+    // An explicit project prefill (`#/new-session/<project>`) always wins.
+    if (route.projectId) return
+    lastSessionRestoredRef.current = true
+    const remembered = readLastSession(lastSessionScope)
+    if (!remembered) return
+    // Drop entries whose session was deleted or archived while away.
+    if (!sessions.some((session) => session.id === remembered)) {
+      clearLastSession(lastSessionScope)
+      return
+    }
+    replaceRoute({ page: "session", sessionId: remembered })
+  }, [routeReady, isLoading, route, sessions, lastSessionScope, replaceRoute])
 
   // ── Panel helpers ─────────────────────────────────────────
 
@@ -1388,6 +1437,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const routeSessionId = route.page === "session" ? route.sessionId : null
   const activeSessionId = routeSessionId ? resolveSessionAlias(routeSessionId, sessionAliases) : null
+
+  // Remember the resolved session (not the raw route value) so aliases reopen
+  // correctly on the next cold start.
+  React.useEffect(() => {
+    if (!routeReady || !activeSessionId) return
+    writeLastSession(lastSessionScope, activeSessionId)
+  }, [routeReady, activeSessionId, lastSessionScope])
+
   const activeSessionOptimisticState = activeSessionId ? getOptimisticSessionState(activeSessionId) : null
   const activeSession = activeSessionId
     ? sessions.find((item) => item.id === activeSessionId) ??
