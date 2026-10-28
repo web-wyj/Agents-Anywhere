@@ -82,9 +82,11 @@ export function readUsageSummary(): UsageSummary | null {
     const todayInput = num(day, "input")
     const todayOutput = num(day, "output")
     const todayCacheRead = num(day, "cacheRead")
-    const balance = ledger.balanceRef
-    const balanceCny = balance && typeof balance.cny === "number" && Number.isFinite(balance.cny)
-      ? balance.cny : num(balance ?? {}, "costCny") || null
+    // balanceRef: { date, total, granted, topped, currency, at, ledgerCost }
+    const balance = ledger.balanceRef ?? {}
+    const currency = typeof balance.currency === "string" ? balance.currency : "CNY"
+    const rawTotal = typeof balance.total === "number" && Number.isFinite(balance.total) ? balance.total : null
+    const balanceCny = currency === "CNY" && rawTotal !== null ? rawTotal : null
     return {
       todayTokens: todayInput + todayOutput + todayCacheRead,
       todayInput,
