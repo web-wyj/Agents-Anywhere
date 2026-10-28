@@ -2044,6 +2044,7 @@ function buildTurnActionsByGroupKey(
   const actions = new Map<string, TurnAction>()
   let copyParts: string[] = []
   let itemIds: string[] = []
+  let replyItems: TimelineItem[] = []
   let endGroupKey: string | null = null
   let turnOpen = false
 
@@ -2052,10 +2053,12 @@ function buildTurnActionsByGroupKey(
       actions.set(endGroupKey, {
         copyText: copyParts.join("\n\n").trim(),
         itemIds: [...new Set(itemIds)],
+        items: replyItems,
       })
     }
     copyParts = []
     itemIds = []
+    replyItems = []
     endGroupKey = null
     turnOpen = false
   }
@@ -2073,6 +2076,7 @@ function buildTurnActionsByGroupKey(
     endGroupKey = timelineGroupKey(group)
     for (const item of replies) {
       itemIds.push(item.id)
+      if (!replyItems.some((existing) => existing.id === item.id)) replyItems.push(item)
       const text = stripInjectedAttachmentMentions(messageText(item)).trim()
       if (text) copyParts.push(text)
     }
